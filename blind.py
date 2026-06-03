@@ -172,10 +172,37 @@ def update_elo(db, winner_id, loser_id, category, k=32, draw=False):
 
 # --- Commands ---
 
+DEMO_MODELS = [
+    {"id": "model-alpha", "provider": "demo", "model": "alpha", "api_key_env": "_"},
+    {"id": "model-beta", "provider": "demo", "model": "beta", "api_key_env": "_"},
+    {"id": "model-gamma", "provider": "demo", "model": "gamma", "api_key_env": "_"},
+]
+
+
+def demo_response(model_id, prompt):
+    """Generate a synthetic response that varies by model."""
+    styles = {
+        "model-alpha": ("concise and technical", 400, 800),
+        "model-beta": ("detailed with examples", 600, 1200),
+        "model-gamma": ("creative and conversational", 500, 1000),
+    }
+    style, lo, hi = styles.get(model_id, ("neutral", 500, 900))
+    latency = random.randint(lo, hi)
+    # Use hash to make responses deterministic per prompt+model but different across models
+    seed = hashlib.md5(f"{model_id}:{prompt}".encode()).hexdigest()
+    responses = {
+        "model-alpha": f"Here's a direct answer:\n\n{prompt.split()[-1].title()} can be understood through three key principles:\n1. Simplicity in design\n2. Composability of components\n3. Clear separation of concerns\n\nThe most important takeaway is that less complexity leads to more maintainable systems.",
+        "model-beta": f"Great question! Let me break this down with an example.\n\nThink of {prompt.split()[0].lower()} like building with LEGO blocks. Each piece has a specific shape and purpose, but you can combine them in countless ways.\n\nFor instance, consider this scenario:\n- Start with the basics\n- Layer on complexity gradually\n- Test each addition independently\n\nHere's a concrete example:\n```\nresult = compose(step1, step2, step3)\n```\n\nThe key insight is that good abstractions compound over time.",
+        "model-gamma": f"Oh, this is a fun one! 🎯\n\nSo here's the thing — most people overthink {prompt.split()[-1].lower()}. The secret is that it's really just about finding patterns and making them repeatable.\n\nI like to think of it as a conversation between your current self and your future self. What would future-you want to know? Start there.\n\nBottom line: keep it simple, keep it human, keep iterating.",
+    }
+    return responses.get(model_id, f"Response about: {prompt}"), latency, random.randint(100, 500)
+
+
 def cmd_compare(args):
     """Run a blind comparison."""
     config = load_config()
     db = get_db()
+    demo = args.demo
 
     # Get prompt
     if args.prompt:
@@ -190,12 +217,16 @@ def cmd_compare(args):
 
     category = args.category or "general"
 
-    # Select models
-    available = [m for m in config["models"] if os.environ.get(m["api_key_env"])]
-    if len(available) < 2:
-        print("Need at least 2 models with API keys configured.")
-        print("Set environment variables:", [m["api_key_env"] for m in config["models"]])
-        return
+    if demo:
+        available = DEMO_MODELS
+    else:
+        # Select models
+        available = [m for m in config["models"] if os.environ.get(m["api_key_env"])]
+        if len(available) < 2:
+            print("Need at least 2 models with API keys configured.")
+            print("Set environment variables:", [m["api_key_env"] for m in config["models"]])
+            print("\nTip: use --demo to try with mock models")
+            return
 
     n = min(args.models or config["default_models_per_round"], len(available))
     selected = random.sample(available, n)
@@ -203,11 +234,14 @@ def cmd_compare(args):
     # Generate comparison ID
     comp_id = hashlib.sha256(f"{prompt}{time.time()}".encode()).hexdigest()[:12]
 
-    # Call models in parallel-ish (sequential for simplicity)
-    print(f"\n⏳ Sending to {n} models...")
+    # Call models
+    print(f"\n⏳ Sending to {n} models{'  [demo mode]' if demo else ''}...")
     results = []
     for model_cfg in selected:
-        content, latency, tokens = call_model(model_cfg, prompt)
+        if demo:
+            content, latency, tokens = demo_response(model_cfg["id"], prompt)
+        else:
+            content, latency, tokens = call_model(model_cfg, prompt)
         if content:
             results.append({"model": model_cfg, "content": content, "latency": latency, "tokens": tokens})
 
@@ -384,6 +418,7 @@ def main():
     p.add_argument("prompt", nargs="*", help="Prompt text (or pipe via stdin)")
     p.add_argument("-c", "--category", help="Task category (e.g. code, writing, research)")
     p.add_argument("-n", "--models", type=int, help="Number of models to compare")
+    p.add_argument("--demo", action="store_true", help="Use mock models (no API keys needed)")
 
     # stats
     p = sub.add_parser("stats", aliases=["s"], help="Show rankings")
