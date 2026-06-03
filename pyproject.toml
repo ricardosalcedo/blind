@@ -1,14 +1,35 @@
 [project]
 name = "blind-llm"
-version = "0.3.0"
-description = "Personal blind LLM comparison tool. Build your own model rankings."
+version = "0.4.0"
+description = "Personal blind LLM comparison tool. Build your own model rankings with Elo scoring."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
+authors = [{name = "Ricardo Salcedo", email = "ricardosalcedo@users.noreply.github.com"}]
+keywords = ["llm", "ai", "comparison", "elo", "benchmark", "blind-test"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = ["httpx>=0.27"]
 
 [project.optional-dependencies]
+bedrock = ["boto3>=1.34"]
 dev = ["pytest>=8.0", "ruff>=0.4"]
+all = ["boto3>=1.34"]
+
+[project.urls]
+Homepage = "https://github.com/ricardosalcedo/blind"
+Repository = "https://github.com/ricardosalcedo/blind"
+Issues = "https://github.com/ricardosalcedo/blind/issues"
 
 [project.scripts]
 blind = "blind:main"

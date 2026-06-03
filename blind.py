@@ -116,6 +116,13 @@ def get_db():
             draws INTEGER DEFAULT 0,
             PRIMARY KEY (model_id, category)
         );
+        CREATE TABLE IF NOT EXISTS elo_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            model_id TEXT NOT NULL,
+            category TEXT NOT NULL,
+            rating REAL NOT NULL,
+            recorded_at TEXT DEFAULT (datetime('now'))
+        );
     """)
     for col, tbl in [("winner_position", "comparisons"), ("vote_type", "comparisons"), ("rank", "responses")]:
         try:
@@ -185,8 +192,8 @@ def length_bias_warning(results):
 async def call_model_async(client, model_cfg, prompt, timeout=60, retries=2):
     provider = model_cfg["provider"]
     model = model_cfg["model"]
-    api_key = os.environ.get(model_cfg["api_key_env"], "")
-    if not api_key:
+    api_key = os.environ.get(model_cfg.get("api_key_env", ""), "")
+    if not api_key and provider not in ("bedrock",):
         return None, 0, 0, 0
 
     for attempt in range(retries + 1):
@@ -263,6 +270,29 @@ async def call_model_async(client, model_cfg, prompt, timeout=60, retries=2):
                     u.get("completion_tokens", 0),
                 )
 
+            elif provider == "bedrock":
+                # AWS Bedrock via boto3 (uses default credential chain)
+                import boto3
+
+                region = model_cfg.get("region", os.environ.get("AWS_REGION", "us-west-2"))
+                bedrock = boto3.client("bedrock-runtime", region_name=region)
+                body = json.dumps(
+                    {
+                        "anthropic_version": "bedrock-2023-05-31",
+                        "max_tokens": 2048,
+                        "messages": [{"role": "user", "content": prompt}],
+                    }
+                )
+                br_resp = bedrock.invoke_model(modelId=model, body=body, contentType="application/json")
+                data = json.loads(br_resp["body"].read())
+                u = data.get("usage", {})
+                return (
+                    data["content"][0]["text"],
+                    int((time.time() - start) * 1000),
+                    u.get("input_tokens", 0),
+                    u.get("output_tokens", 0),
+                )
+
         except (httpx.TimeoutException, httpx.ConnectError):
             if attempt < retries:
                 await asyncio.sleep(1 * (attempt + 1))
@@ -333,6 +363,13 @@ def update_elo(db, winner_id, loser_id, category, k=32, draw=False):
             (rb + k * (0 - eb), loser_id, category),
         )
     db.commit()
+    # Record history for charting
+    for mid in (winner_id, loser_id):
+        r = db.execute("SELECT rating FROM elo_ratings WHERE model_id=? AND category=?", (mid, category)).fetchone()
+        db.execute(
+            "INSERT INTO elo_history (model_id, category, rating) VALUES (?, ?, ?)", (mid, category, r["rating"])
+        )
+    db.commit()
 
 
 def elo_confidence(wins, losses, draws):
@@ -370,7 +407,9 @@ def cmd_compare(args):
     if demo:
         available = DEMO_MODELS
     else:
-        available = [m for m in config["models"] if os.environ.get(m["api_key_env"])]
+        available = [
+            m for m in config["models"] if m.get("provider") == "bedrock" or os.environ.get(m.get("api_key_env", ""))
+        ]
         if len(available) < 2:
             print("Need at least 2 models with API keys set.")
             print("Keys needed:", [m["api_key_env"] for m in config["models"]])
@@ -729,6 +768,81 @@ def cmd_categories(args):
         print(f"  {r['category']:<20} {r['n']} comparisons")
 
 
+def cmd_chart(args):
+    """ASCII Elo trend chart."""
+    db = get_db()
+    cat_filter = args.category
+
+    if cat_filter:
+        rows = db.execute(
+            "SELECT model_id, rating, recorded_at FROM elo_history WHERE category=? ORDER BY recorded_at",
+            (cat_filter,),
+        ).fetchall()
+    else:
+        rows = db.execute("SELECT model_id, rating, recorded_at FROM elo_history ORDER BY recorded_at").fetchall()
+
+    if not rows:
+        print("No history yet. Run some comparisons first.")
+        return
+
+    # Group by model
+    series = {}
+    for r in rows:
+        series.setdefault(r["model_id"], []).append(r["rating"])
+
+    # Chart dimensions
+    width = min(60, max(len(pts) for pts in series.values()))
+    height = 15
+
+    # Get global min/max
+    all_ratings = [r for pts in series.values() for r in pts]
+    lo = min(all_ratings) - 10
+    hi = max(all_ratings) + 10
+    span = hi - lo if hi > lo else 1
+
+    # Symbols per model
+    symbols = "●○◆◇■□▲△"
+    model_ids = sorted(series.keys())
+
+    print(f"\n📈 Elo Trend{f' — {cat_filter}' if cat_filter else ''}")
+    print(f"  {hi:.0f} ┐")
+
+    # Build grid
+    grid = [[" "] * width for _ in range(height)]
+    for mi, mid in enumerate(model_ids):
+        pts = series[mid]
+        # Resample to width
+        if len(pts) > width:
+            step = len(pts) / width
+            sampled = [pts[int(i * step)] for i in range(width)]
+        else:
+            sampled = pts
+
+        sym = symbols[mi % len(symbols)]
+        for x, rating in enumerate(sampled):
+            y = int((rating - lo) / span * (height - 1))
+            y = max(0, min(height - 1, y))
+            grid[height - 1 - y][x] = sym
+
+    # Print grid
+    for row_idx, row in enumerate(grid):
+        if row_idx == height // 2:
+            mid_val = (hi + lo) / 2
+            print(f"  {mid_val:.0f} ┤{''.join(row)}")
+        else:
+            print(f"       │{''.join(row)}")
+
+    print(f"  {lo:.0f} ┘{'─' * width}")
+    print(f"       {'oldest':<{width - 6}}{'latest':>6}")
+
+    # Legend
+    print("\n  Legend:")
+    for mi, mid in enumerate(model_ids):
+        sym = symbols[mi % len(symbols)]
+        current = series[mid][-1]
+        print(f"    {sym} {mid:<20} (current: {current:.0f})")
+
+
 def cmd_export(args):
     db = get_db()
     out = args.output or "blind_export.csv"
@@ -852,6 +966,9 @@ def main():
 
     sub.add_parser("categories", aliases=["cat"], help="List categories")
 
+    p = sub.add_parser("chart", help="ASCII Elo trend chart")
+    p.add_argument("-c", "--category")
+
     p = sub.add_parser("export", help="Export to CSV")
     p.add_argument("-o", "--output")
 
@@ -882,6 +999,7 @@ def main():
         "h": cmd_history,
         "categories": cmd_categories,
         "cat": cmd_categories,
+        "chart": cmd_chart,
         "export": cmd_export,
         "import": cmd_import_csv,
         "reset": cmd_reset,
