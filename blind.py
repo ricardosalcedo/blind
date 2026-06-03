@@ -12,7 +12,6 @@ import random
 import sqlite3
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -22,7 +21,12 @@ CONFIG_PATH = Path(os.environ.get("BLIND_CONFIG", Path.home() / ".blind" / "conf
 
 DEFAULT_CONFIG = {
     "models": [
-        {"id": "claude-sonnet", "provider": "anthropic", "model": "claude-sonnet-4-20250514", "api_key_env": "ANTHROPIC_API_KEY"},
+        {
+            "id": "claude-sonnet",
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-20250514",
+            "api_key_env": "ANTHROPIC_API_KEY",
+        },
         {"id": "gpt-4o", "provider": "openai", "model": "gpt-4o", "api_key_env": "OPENAI_API_KEY"},
         {"id": "gemini-pro", "provider": "google", "model": "gemini-2.5-pro", "api_key_env": "GOOGLE_API_KEY"},
     ],
@@ -33,9 +37,12 @@ DEFAULT_CONFIG = {
 }
 
 MODEL_COSTS = {  # (input, output) per 1M tokens
-    "gpt-4o": (2.50, 10.00), "gpt-4o-mini": (0.15, 0.60),
-    "claude-sonnet-4-20250514": (3.00, 15.00), "claude-haiku-4-5-20251001": (0.80, 4.00),
-    "gemini-2.5-pro": (1.25, 10.00), "gemini-2.0-flash": (0.10, 0.40),
+    "gpt-4o": (2.50, 10.00),
+    "gpt-4o-mini": (0.15, 0.60),
+    "claude-sonnet-4-20250514": (3.00, 15.00),
+    "claude-haiku-4-5-20251001": (0.80, 4.00),
+    "gemini-2.5-pro": (1.25, 10.00),
+    "gemini-2.0-flash": (0.10, 0.40),
 }
 
 DEMO_MODELS = [
@@ -45,7 +52,21 @@ DEMO_MODELS = [
 ]
 
 CATEGORY_KEYWORDS = {
-    "code": ["code", "function", "implement", "debug", "error", "class", "api", "algorithm", "refactor", "test", "bug", "python", "javascript"],
+    "code": [
+        "code",
+        "function",
+        "implement",
+        "debug",
+        "error",
+        "class",
+        "api",
+        "algorithm",
+        "refactor",
+        "test",
+        "bug",
+        "python",
+        "javascript",
+    ],
     "writing": ["write", "essay", "poem", "story", "email", "blog", "haiku", "letter", "article", "rewrite", "draft"],
     "math": ["calculate", "solve", "equation", "proof", "integral", "probability", "formula", "sum", "derivative"],
     "research": ["explain", "compare", "difference", "history", "why does", "how does", "what is", "analyze"],
@@ -56,6 +77,7 @@ CATEGORY_KEYWORDS = {
 # ──────────────────────────────────────────────────────────────────────────────
 # Database
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def get_db():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -98,7 +120,7 @@ def get_db():
     for col, tbl in [("winner_position", "comparisons"), ("vote_type", "comparisons"), ("rank", "responses")]:
         try:
             db.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} TEXT")
-        except:
+        except Exception:
             pass
     return db
 
@@ -106,6 +128,7 @@ def get_db():
 # ──────────────────────────────────────────────────────────────────────────────
 # Utilities
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def auto_categorize(prompt):
     prompt_lower = prompt.lower()
@@ -130,7 +153,7 @@ def check_position_bias(db):
         return None
     for r in rows:
         if r["n"] / total > 0.75:
-            return f"⚠️  Position bias: you pick '{r['winner_position']}' {r['n']/total:.0%} of the time."
+            return f"⚠️  Position bias: you pick '{r['winner_position']}' {r['n'] / total:.0%} of the time."
     return None
 
 
@@ -150,13 +173,14 @@ def length_bias_warning(results):
     if max(lengths) >= 3 * min(lengths) and min(lengths) > 10:
         short_idx = lengths.index(min(lengths))
         long_idx = lengths.index(max(lengths))
-        return f"  ℹ️  Length disparity: {labels[long_idx]} is {max(lengths)//min(lengths)}x longer than {labels[short_idx]}. Longer ≠ better."
+        return f"  ℹ️  Length disparity: {labels[long_idx]} is {max(lengths) // min(lengths)}x longer than {labels[short_idx]}. Longer ≠ better."
     return None
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # LLM Providers
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 async def call_model_async(client, model_cfg, prompt, timeout=60, retries=2):
     provider = model_cfg["provider"]
@@ -169,47 +193,86 @@ async def call_model_async(client, model_cfg, prompt, timeout=60, retries=2):
         start = time.time()
         try:
             if provider == "openai":
-                resp = await client.post("https://api.openai.com/v1/chat/completions",
+                resp = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
                     headers={"Authorization": f"Bearer {api_key}"},
-                    json={"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 2048}, timeout=timeout)
+                    json={"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 2048},
+                    timeout=timeout,
+                )
                 data = resp.json()
-                if "error" in data: raise Exception(data["error"]["message"])
+                if "error" in data:
+                    raise Exception(data["error"]["message"])
                 u = data.get("usage", {})
-                return data["choices"][0]["message"]["content"], int((time.time()-start)*1000), u.get("prompt_tokens",0), u.get("completion_tokens",0)
+                return (
+                    data["choices"][0]["message"]["content"],
+                    int((time.time() - start) * 1000),
+                    u.get("prompt_tokens", 0),
+                    u.get("completion_tokens", 0),
+                )
 
             elif provider == "anthropic":
-                resp = await client.post("https://api.anthropic.com/v1/messages",
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
                     headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
-                    json={"model": model, "max_tokens": 2048, "messages": [{"role": "user", "content": prompt}]}, timeout=timeout)
+                    json={"model": model, "max_tokens": 2048, "messages": [{"role": "user", "content": prompt}]},
+                    timeout=timeout,
+                )
                 data = resp.json()
-                if "error" in data: raise Exception(data["error"]["message"])
+                if "error" in data:
+                    raise Exception(data["error"]["message"])
                 u = data.get("usage", {})
-                return data["content"][0]["text"], int((time.time()-start)*1000), u.get("input_tokens",0), u.get("output_tokens",0)
+                return (
+                    data["content"][0]["text"],
+                    int((time.time() - start) * 1000),
+                    u.get("input_tokens", 0),
+                    u.get("output_tokens", 0),
+                )
 
             elif provider == "google":
                 resp = await client.post(
                     f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
-                    json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=timeout)
+                    json={"contents": [{"parts": [{"text": prompt}]}]},
+                    timeout=timeout,
+                )
                 data = resp.json()
-                if "error" in data: raise Exception(data["error"]["message"])
+                if "error" in data:
+                    raise Exception(data["error"]["message"])
                 u = data.get("usageMetadata", {})
-                return data["candidates"][0]["content"]["parts"][0]["text"], int((time.time()-start)*1000), u.get("promptTokenCount",0), u.get("candidatesTokenCount",0)
+                return (
+                    data["candidates"][0]["content"]["parts"][0]["text"],
+                    int((time.time() - start) * 1000),
+                    u.get("promptTokenCount", 0),
+                    u.get("candidatesTokenCount", 0),
+                )
 
             elif provider == "openai-compatible":
                 base_url = model_cfg.get("base_url", "http://localhost:11434/v1")
                 headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-                resp = await client.post(f"{base_url}/chat/completions", headers=headers,
-                    json={"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 2048}, timeout=timeout)
+                resp = await client.post(
+                    f"{base_url}/chat/completions",
+                    headers=headers,
+                    json={"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 2048},
+                    timeout=timeout,
+                )
                 data = resp.json()
                 u = data.get("usage", {})
-                return data["choices"][0]["message"]["content"], int((time.time()-start)*1000), u.get("prompt_tokens",0), u.get("completion_tokens",0)
+                return (
+                    data["choices"][0]["message"]["content"],
+                    int((time.time() - start) * 1000),
+                    u.get("prompt_tokens", 0),
+                    u.get("completion_tokens", 0),
+                )
 
         except (httpx.TimeoutException, httpx.ConnectError):
-            if attempt < retries: await asyncio.sleep(1*(attempt+1)); continue
+            if attempt < retries:
+                await asyncio.sleep(1 * (attempt + 1))
+                continue
             print(f"  ⚠ {model_cfg['id']} timed out", file=sys.stderr)
             return None, 0, 0, 0
         except Exception as e:
-            if attempt < retries: await asyncio.sleep(1); continue
+            if attempt < retries:
+                await asyncio.sleep(1)
+                continue
             print(f"  ⚠ {model_cfg['id']}: {e}", file=sys.stderr)
             return None, 0, 0, 0
     return None, 0, 0, 0
@@ -226,8 +289,8 @@ def demo_response(model_id, prompt):
     latency = random.randint(400, 1200)
     responses = {
         "model-alpha": f"Here's a direct answer:\n\n{prompt.split()[-1].title()} involves three key principles:\n1. Simplicity in design\n2. Composability of components\n3. Clear separation of concerns\n\nLess complexity leads to more maintainable systems.",
-        "model-beta": f"Let me break this down with an example.\n\nThink of it like LEGO — each piece has a purpose, but you combine them freely.\n\n- Start with the basics\n- Layer complexity gradually\n- Test each addition independently\n\n```\nresult = compose(step1, step2, step3)\n```\n\nGood abstractions compound over time. The key is to identify the right level of abstraction for your problem domain and stick with it consistently.",
-        "model-gamma": f"Oh, this is a fun one! 🎯\n\nMost people overthink this. The secret: find patterns, make them repeatable.\n\nThink of it as a conversation between current-you and future-you. What would future-you want to know?\n\nKeep it simple, keep it human, keep iterating.",
+        "model-beta": "Let me break this down with an example.\n\nThink of it like LEGO — each piece has a purpose, but you combine them freely.\n\n- Start with the basics\n- Layer complexity gradually\n- Test each addition independently\n\n```\nresult = compose(step1, step2, step3)\n```\n\nGood abstractions compound over time. The key is to identify the right level of abstraction for your problem domain and stick with it consistently.",
+        "model-gamma": "Oh, this is a fun one! 🎯\n\nMost people overthink this. The secret: find patterns, make them repeatable.\n\nThink of it as a conversation between current-you and future-you. What would future-you want to know?\n\nKeep it simple, keep it human, keep iterating.",
     }
     return responses.get(model_id, f"Response: {prompt}"), latency, 50, random.randint(80, 200)
 
@@ -236,6 +299,7 @@ def demo_response(model_id, prompt):
 # Elo
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def expected_score(ra, rb):
     return 1 / (1 + 10 ** ((rb - ra) / 400))
 
@@ -243,15 +307,31 @@ def expected_score(ra, rb):
 def update_elo(db, winner_id, loser_id, category, k=32, draw=False):
     for mid in (winner_id, loser_id):
         db.execute("INSERT OR IGNORE INTO elo_ratings (model_id, category) VALUES (?, ?)", (mid, category))
-    ra = db.execute("SELECT rating FROM elo_ratings WHERE model_id=? AND category=?", (winner_id, category)).fetchone()["rating"]
-    rb = db.execute("SELECT rating FROM elo_ratings WHERE model_id=? AND category=?", (loser_id, category)).fetchone()["rating"]
+    ra = db.execute("SELECT rating FROM elo_ratings WHERE model_id=? AND category=?", (winner_id, category)).fetchone()[
+        "rating"
+    ]
+    rb = db.execute("SELECT rating FROM elo_ratings WHERE model_id=? AND category=?", (loser_id, category)).fetchone()[
+        "rating"
+    ]
     ea, eb = expected_score(ra, rb), expected_score(rb, ra)
     if draw:
-        db.execute("UPDATE elo_ratings SET rating=?, draws=draws+1 WHERE model_id=? AND category=?", (ra+k*(0.5-ea), winner_id, category))
-        db.execute("UPDATE elo_ratings SET rating=?, draws=draws+1 WHERE model_id=? AND category=?", (rb+k*(0.5-eb), loser_id, category))
+        db.execute(
+            "UPDATE elo_ratings SET rating=?, draws=draws+1 WHERE model_id=? AND category=?",
+            (ra + k * (0.5 - ea), winner_id, category),
+        )
+        db.execute(
+            "UPDATE elo_ratings SET rating=?, draws=draws+1 WHERE model_id=? AND category=?",
+            (rb + k * (0.5 - eb), loser_id, category),
+        )
     else:
-        db.execute("UPDATE elo_ratings SET rating=?, wins=wins+1 WHERE model_id=? AND category=?", (ra+k*(1-ea), winner_id, category))
-        db.execute("UPDATE elo_ratings SET rating=?, losses=losses+1 WHERE model_id=? AND category=?", (rb+k*(0-eb), loser_id, category))
+        db.execute(
+            "UPDATE elo_ratings SET rating=?, wins=wins+1 WHERE model_id=? AND category=?",
+            (ra + k * (1 - ea), winner_id, category),
+        )
+        db.execute(
+            "UPDATE elo_ratings SET rating=?, losses=losses+1 WHERE model_id=? AND category=?",
+            (rb + k * (0 - eb), loser_id, category),
+        )
     db.commit()
 
 
@@ -282,7 +362,8 @@ def cmd_compare(args):
         print("Enter your prompt (Ctrl+D to finish):")
         prompt = sys.stdin.read().strip()
     if not prompt:
-        print("No prompt provided."); return
+        print("No prompt provided.")
+        return
 
     category = args.category or auto_categorize(prompt)
 
@@ -293,7 +374,8 @@ def cmd_compare(args):
         if len(available) < 2:
             print("Need at least 2 models with API keys set.")
             print("Keys needed:", [m["api_key_env"] for m in config["models"]])
-            print("\nUse --demo to try with mock models"); return
+            print("\nUse --demo to try with mock models")
+            return
 
     n = min(args.models or config["default_models_per_round"], len(available))
     selected = random.sample(available, n)
@@ -309,29 +391,50 @@ def cmd_compare(args):
     for i, (content, lat, in_t, out_t) in enumerate(raw):
         if content:
             cost = estimate_cost(selected[i]["model"], in_t, out_t) if not demo else 0
-            results.append({"model": selected[i], "content": content, "latency": lat, "in_tokens": in_t, "out_tokens": out_t, "cost": cost})
+            results.append(
+                {
+                    "model": selected[i],
+                    "content": content,
+                    "latency": lat,
+                    "in_tokens": in_t,
+                    "out_tokens": out_t,
+                    "cost": cost,
+                }
+            )
 
     if len(results) < 2:
-        print("Not enough models responded."); return
+        print("Not enough models responded.")
+        return
 
     random.shuffle(results)
 
     # Store
     db.execute("INSERT INTO comparisons (id, prompt, category) VALUES (?, ?, ?)", (comp_id, prompt, category))
     for i, r in enumerate(results):
-        db.execute("INSERT INTO responses (comparison_id, model_id, label, content, latency_ms, input_tokens, output_tokens, cost_usd) VALUES (?,?,?,?,?,?,?,?)",
-            (comp_id, r["model"]["id"], labels[i], r["content"], r["latency"], r["in_tokens"], r["out_tokens"], r["cost"]))
+        db.execute(
+            "INSERT INTO responses (comparison_id, model_id, label, content, latency_ms, input_tokens, output_tokens, cost_usd) VALUES (?,?,?,?,?,?,?,?)",
+            (
+                comp_id,
+                r["model"]["id"],
+                labels[i],
+                r["content"],
+                r["latency"],
+                r["in_tokens"],
+                r["out_tokens"],
+                r["cost"],
+            ),
+        )
     db.commit()
 
     # Display
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  Comparison: {comp_id} | Category: {category}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     for i, r in enumerate(results):
         wc = len(r["content"].split())
-        print(f"\n{'─'*60}")
+        print(f"\n{'─' * 60}")
         print(f"  Response {labels[i]}  ({r['latency']}ms · {wc} words)")
-        print(f"{'─'*60}")
+        print(f"{'─' * 60}")
         print(r["content"])
 
     # Length bias warning
@@ -339,55 +442,66 @@ def cmd_compare(args):
     if max(lengths) >= 3 * min(lengths) and min(lengths) > 10:
         short_i = lengths.index(min(lengths))
         long_i = lengths.index(max(lengths))
-        print(f"\n  ℹ️  {labels[long_i]} is {max(lengths)//min(lengths)}x longer than {labels[short_i]}. Longer ≠ better.")
+        print(
+            f"\n  ℹ️  {labels[long_i]} is {max(lengths) // min(lengths)}x longer than {labels[short_i]}. Longer ≠ better."
+        )
 
     # Vote
-    choices = "/".join(labels[:len(results)])
-    print(f"\n{'='*60}")
+    choices = "/".join(labels[: len(results)])
+    print(f"\n{'=' * 60}")
 
     if args.rank and len(results) > 2:
-        print(f"  Rank all responses best→worst (e.g. 'BAC'):")
+        print("  Rank all responses best→worst (e.g. 'BAC'):")
     else:
         print(f"  Which is better? [{choices}] or [tie] or [skip]")
 
     bias = check_position_bias(db)
-    if bias: print(f"  {bias}")
+    if bias:
+        print(f"  {bias}")
 
     vote = input("  > ").strip().upper()
 
     # Handle ranking mode
-    if args.rank and len(vote) == len(results) and all(c in labels[:len(results)] for c in vote):
+    if args.rank and len(vote) == len(results) and all(c in labels[: len(results)] for c in vote):
         db.execute("UPDATE comparisons SET status='ranked', vote_type='rank' WHERE id=?", (comp_id,))
         for pos, letter in enumerate(vote):
-            idx = labels.index(letter)
-            db.execute("UPDATE responses SET rank=? WHERE comparison_id=? AND label=?", (pos+1, comp_id, letter))
+            labels.index(letter)
+            db.execute("UPDATE responses SET rank=? WHERE comparison_id=? AND label=?", (pos + 1, comp_id, letter))
         # Update Elo: each pair where higher-ranked beats lower-ranked
         for i in range(len(vote)):
-            for j in range(i+1, len(vote)):
+            for j in range(i + 1, len(vote)):
                 wi = labels.index(vote[i])
                 li = labels.index(vote[j])
                 update_elo(db, results[wi]["model"]["id"], results[li]["model"]["id"], category)
         db.commit()
         print(f"\n  ✓ Ranked: {' > '.join(vote)}")
-        _reveal(results); return
+        _reveal(results)
+        return
 
     if vote == "SKIP":
-        db.execute("UPDATE comparisons SET status='skipped' WHERE id=?", (comp_id,)); db.commit()
-        print("  Skipped."); return
+        db.execute("UPDATE comparisons SET status='skipped' WHERE id=?", (comp_id,))
+        db.commit()
+        print("  Skipped.")
+        return
 
     if vote == "TIE":
-        db.execute("UPDATE comparisons SET status='tie' WHERE id=?", (comp_id,)); db.commit()
+        db.execute("UPDATE comparisons SET status='tie' WHERE id=?", (comp_id,))
+        db.commit()
         for i in range(len(results)):
-            for j in range(i+1, len(results)):
+            for j in range(i + 1, len(results)):
                 update_elo(db, results[i]["model"]["id"], results[j]["model"]["id"], category, draw=True)
         print("  Tie recorded.")
-        _reveal(results); return
+        _reveal(results)
+        return
 
-    if vote in labels[:len(results)]:
+    if vote in labels[: len(results)]:
         wi = labels.index(vote)
         winner = results[wi]
-        db.execute("UPDATE comparisons SET status='voted', winner_model=?, winner_position=?, vote_type='pick' WHERE id=?",
-                   (winner["model"]["id"], vote, comp_id)); db.commit()
+        db.execute(
+            "UPDATE comparisons SET status='voted', winner_model=?, winner_position=?, vote_type='pick' WHERE id=?",
+            (winner["model"]["id"], vote, comp_id),
+        )
+        db.commit()
         for i, r in enumerate(results):
             if i != wi:
                 update_elo(db, winner["model"]["id"], r["model"]["id"], category)
@@ -396,7 +510,8 @@ def cmd_compare(args):
         # Streak check
         for r in results:
             s = check_streak(db, r["model"]["id"])
-            if s: print(f"  {s}")
+            if s:
+                print(f"  {s}")
     else:
         print("  Invalid choice.")
 
@@ -422,17 +537,20 @@ def cmd_stats(args):
         title = "All categories (averaged)"
 
     if not rows:
-        print("  No data yet. Run `blind compare` to start."); return
+        print("  No data yet. Run `blind compare` to start.")
+        return
 
     print(f"\n📊 Rankings — {title}")
     print(f"  {'Model':<20} {'Elo':>7} {'±CI':>5} {'W':>4} {'L':>4} {'D':>4} {'Win%':>6}")
-    print(f"  {'─'*55}")
+    print(f"  {'─' * 55}")
     for r in rows:
         total = r["wins"] + r["losses"] + r["draws"]
-        win_pct = f"{r['wins']/total*100:.0f}%" if total > 0 else "—"
+        win_pct = f"{r['wins'] / total * 100:.0f}%" if total > 0 else "—"
         ci = elo_confidence(r["wins"], r["losses"], r["draws"])
         ci_str = f"±{ci:.0f}" if ci else "  —"
-        print(f"  {r['model_id']:<20} {r['rating']:>7.0f} {ci_str:>5} {r['wins']:>4} {r['losses']:>4} {r['draws']:>4} {win_pct:>6}")
+        print(
+            f"  {r['model_id']:<20} {r['rating']:>7.0f} {ci_str:>5} {r['wins']:>4} {r['losses']:>4} {r['draws']:>4} {win_pct:>6}"
+        )
 
     total = db.execute("SELECT COUNT(*) as n FROM comparisons WHERE status IN ('voted','tie','ranked')").fetchone()
     print(f"\n  Total comparisons: {total['n']}")
@@ -442,7 +560,8 @@ def cmd_stats(args):
         print(f"  Total cost: ${cost_row['total']:.4f}")
 
     bias = check_position_bias(db)
-    if bias: print(f"\n  {bias}")
+    if bias:
+        print(f"\n  {bias}")
 
 
 def cmd_head2head(args):
@@ -450,7 +569,8 @@ def cmd_head2head(args):
     db = get_db()
     models = [r["model_id"] for r in db.execute("SELECT DISTINCT model_id FROM elo_ratings").fetchall()]
     if len(models) < 2:
-        print("Need at least 2 models with data."); return
+        print("Need at least 2 models with data.")
+        return
 
     print("\n🥊 Head-to-Head Win Rates")
     print(f"  {'':>15}", end="")
@@ -464,18 +584,24 @@ def cmd_head2head(args):
             if m1 == m2:
                 print(f" {'—':>8}", end="")
             else:
-                wins = db.execute("""
+                wins = db.execute(
+                    """
                     SELECT COUNT(*) as n FROM comparisons c
                     JOIN responses r1 ON r1.comparison_id=c.id AND r1.model_id=?
                     JOIN responses r2 ON r2.comparison_id=c.id AND r2.model_id=?
                     WHERE c.winner_model=? AND c.status='voted'
-                """, (m1, m2, m1)).fetchone()["n"]
-                total = db.execute("""
+                """,
+                    (m1, m2, m1),
+                ).fetchone()["n"]
+                total = db.execute(
+                    """
                     SELECT COUNT(*) as n FROM comparisons c
                     JOIN responses r1 ON r1.comparison_id=c.id AND r1.model_id=?
                     JOIN responses r2 ON r2.comparison_id=c.id AND r2.model_id=?
                     WHERE c.status IN ('voted','tie')
-                """, (m1, m2)).fetchone()["n"]
+                """,
+                    (m1, m2),
+                ).fetchone()["n"]
                 rate = f"{wins}/{total}" if total > 0 else "0/0"
                 print(f" {rate:>8}", end="")
         print()
@@ -486,7 +612,8 @@ def cmd_insights(args):
     db = get_db()
     total = db.execute("SELECT COUNT(*) as n FROM comparisons WHERE status IN ('voted','tie','ranked')").fetchone()["n"]
     if total < 5:
-        print("Need at least 5 comparisons for insights."); return
+        print("Need at least 5 comparisons for insights.")
+        return
 
     print(f"\n💡 Insights ({total} comparisons)\n")
 
@@ -503,7 +630,7 @@ def cmd_insights(args):
             top = winners[0]
             total_cat = sum(w[1] for w in winners)
             if top[1] / total_cat > 0.6:
-                print(f"  📌 {top[0]} dominates in '{cat}' ({top[1]}/{total_cat} = {top[1]/total_cat:.0%})")
+                print(f"  📌 {top[0]} dominates in '{cat}' ({top[1]}/{total_cat} = {top[1] / total_cat:.0%})")
 
     # 2. Length preference
     shorter_wins = 0
@@ -512,7 +639,9 @@ def cmd_insights(args):
         SELECT c.id, c.winner_model FROM comparisons c WHERE c.status='voted'
     """).fetchall()
     for comp in rows:
-        resps = db.execute("SELECT model_id, LENGTH(content) as len FROM responses WHERE comparison_id=?", (comp["id"],)).fetchall()
+        resps = db.execute(
+            "SELECT model_id, LENGTH(content) as len FROM responses WHERE comparison_id=?", (comp["id"],)
+        ).fetchall()
         if len(resps) >= 2:
             winner_len = next((r["len"] for r in resps if r["model_id"] == comp["winner_model"]), 0)
             avg_len = sum(r["len"] for r in resps) / len(resps)
@@ -525,7 +654,9 @@ def cmd_insights(args):
         if shorter_wins > longer_wins * 1.5:
             print(f"  📏 You tend to prefer shorter responses ({shorter_wins} vs {longer_wins} longer wins)")
         elif longer_wins > shorter_wins * 1.5:
-            print(f"  📏 You tend to prefer longer/more detailed responses ({longer_wins} vs {shorter_wins} shorter wins)")
+            print(
+                f"  📏 You tend to prefer longer/more detailed responses ({longer_wins} vs {shorter_wins} shorter wins)"
+            )
 
     # 3. Latency preference
     faster_wins = 0
@@ -537,7 +668,7 @@ def cmd_insights(args):
             if winner_lat == min(r["latency_ms"] for r in resps):
                 faster_wins += 1
     if total > 10 and faster_wins / total > 0.65:
-        print(f"  ⚡ The faster model wins {faster_wins/total:.0%} of the time — you might value speed")
+        print(f"  ⚡ The faster model wins {faster_wins / total:.0%} of the time — you might value speed")
 
     # 4. Position bias
     bias = check_position_bias(db)
@@ -555,10 +686,12 @@ def cmd_insights(args):
 def cmd_replay(args):
     """Re-run a past comparison with current models."""
     db = get_db()
-    comp = db.execute("SELECT * FROM comparisons WHERE id LIKE ? ORDER BY created_at DESC LIMIT 1",
-                      (f"{args.id}%",)).fetchone()
+    comp = db.execute(
+        "SELECT * FROM comparisons WHERE id LIKE ? ORDER BY created_at DESC LIMIT 1", (f"{args.id}%",)
+    ).fetchone()
     if not comp:
-        print(f"Comparison '{args.id}' not found."); return
+        print(f"Comparison '{args.id}' not found.")
+        return
 
     print(f"Replaying: {comp['prompt'][:80]}")
     # Inject the prompt back into compare
@@ -570,9 +703,11 @@ def cmd_history(args):
     db = get_db()
     rows = db.execute(
         "SELECT id, prompt, category, winner_model, status, created_at FROM comparisons ORDER BY created_at DESC LIMIT ?",
-        (args.limit,)).fetchall()
+        (args.limit,),
+    ).fetchall()
     if not rows:
-        print("No history yet."); return
+        print("No history yet.")
+        return
 
     print(f"\n📜 Last {len(rows)} comparisons:")
     for r in rows:
@@ -587,7 +722,8 @@ def cmd_categories(args):
         "SELECT category, COUNT(*) as n FROM comparisons WHERE status IN ('voted','tie','ranked') GROUP BY category ORDER BY n DESC"
     ).fetchall()
     if not rows:
-        print("No categories yet."); return
+        print("No categories yet.")
+        return
     print("\n📁 Categories:")
     for r in rows:
         print(f"  {r['category']:<20} {r['n']} comparisons")
@@ -603,9 +739,39 @@ def cmd_export(args):
     """).fetchall()
     with open(out, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["date","category","prompt","winner","status","model","label","latency_ms","in_tokens","out_tokens","cost_usd","rank"])
+        w.writerow(
+            [
+                "date",
+                "category",
+                "prompt",
+                "winner",
+                "status",
+                "model",
+                "label",
+                "latency_ms",
+                "in_tokens",
+                "out_tokens",
+                "cost_usd",
+                "rank",
+            ]
+        )
         for r in rows:
-            w.writerow([r["created_at"],r["category"],r["prompt"][:100],r["winner_model"],r["status"],r["model_id"],r["label"],r["latency_ms"],r["input_tokens"],r["output_tokens"],r["cost_usd"],r["rank"]])
+            w.writerow(
+                [
+                    r["created_at"],
+                    r["category"],
+                    r["prompt"][:100],
+                    r["winner_model"],
+                    r["status"],
+                    r["model_id"],
+                    r["label"],
+                    r["latency_ms"],
+                    r["input_tokens"],
+                    r["output_tokens"],
+                    r["cost_usd"],
+                    r["rank"],
+                ]
+            )
     print(f"✓ Exported {len(rows)} rows to {out}")
 
 
@@ -624,7 +790,8 @@ def cmd_import_csv(args):
 
 def cmd_reset(args):
     if not args.confirm:
-        print("Delete all data? Use --confirm"); return
+        print("Delete all data? Use --confirm")
+        return
     db = get_db()
     db.executescript("DELETE FROM responses; DELETE FROM comparisons; DELETE FROM elo_ratings;")
     print("✓ All data reset.")
@@ -633,7 +800,8 @@ def cmd_reset(args):
 def cmd_init(args):
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     if CONFIG_PATH.exists() and not args.force:
-        print(f"Config exists at {CONFIG_PATH}. Use --force to overwrite."); return
+        print(f"Config exists at {CONFIG_PATH}. Use --force to overwrite.")
+        return
     with open(CONFIG_PATH, "w") as f:
         json.dump(DEFAULT_CONFIG, f, indent=2)
     print(f"✓ Config created at {CONFIG_PATH}")
@@ -654,8 +822,11 @@ def load_config():
 # Main
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def main():
-    parser = argparse.ArgumentParser(prog="blind", description="Personal blind LLM comparison — build your own model rankings")
+    parser = argparse.ArgumentParser(
+        prog="blind", description="Personal blind LLM comparison — build your own model rankings"
+    )
     sub = parser.add_subparsers(dest="command")
 
     p = sub.add_parser("compare", aliases=["c"], help="Run a blind comparison")
@@ -697,13 +868,20 @@ def main():
 
     args = parser.parse_args()
     cmds = {
-        "compare": cmd_compare, "c": cmd_compare,
-        "stats": cmd_stats, "s": cmd_stats,
-        "head2head": cmd_head2head, "h2h": cmd_head2head,
-        "insights": cmd_insights, "i": cmd_insights,
-        "replay": cmd_replay, "r": cmd_replay,
-        "history": cmd_history, "h": cmd_history,
-        "categories": cmd_categories, "cat": cmd_categories,
+        "compare": cmd_compare,
+        "c": cmd_compare,
+        "stats": cmd_stats,
+        "s": cmd_stats,
+        "head2head": cmd_head2head,
+        "h2h": cmd_head2head,
+        "insights": cmd_insights,
+        "i": cmd_insights,
+        "replay": cmd_replay,
+        "r": cmd_replay,
+        "history": cmd_history,
+        "h": cmd_history,
+        "categories": cmd_categories,
+        "cat": cmd_categories,
         "export": cmd_export,
         "import": cmd_import_csv,
         "reset": cmd_reset,

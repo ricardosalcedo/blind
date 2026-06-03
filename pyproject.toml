@@ -1,11 +1,14 @@
 [project]
 name = "blind-llm"
-version = "0.1.0"
+version = "0.3.0"
 description = "Personal blind LLM comparison tool. Build your own model rankings."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 dependencies = ["httpx>=0.27"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.4"]
 
 [project.scripts]
 blind = "blind:main"
@@ -16,3 +19,14 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]
