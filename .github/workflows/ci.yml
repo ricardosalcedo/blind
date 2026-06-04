@@ -41,7 +41,7 @@ jobs:
         run: pip install ruff
 
       - name: Lint
-        run: ruff check blind.py
+        run: ruff check blind/
 
       - name: Format check
-        run: ruff format --check blind.py
+        run: ruff format --check blind/
